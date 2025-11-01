@@ -1,1 +1,0 @@
-# darrinsimmons.github.io
