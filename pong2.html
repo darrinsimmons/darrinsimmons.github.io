@@ -1,270 +1,196 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Pong vs AI – Tilt to Play!</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #000;
-      overflow: hidden;
-      font-family: 'Arial', sans-serif;
-      touch-action: none;
-    }
-    canvas {
-      background: #000;
-      border: 4px solid #0f0;
-      image-rendering: pixelated;
-      max-width: 100%;
-      max-height: 100%;
-    }
-    #ui {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      pointer-events: none;
-      color: #0f0;
-      font-size: 1.5rem;
-      text-align: center;
-      padding-top: 20px;
-    }
-    #score {
-      font-size: 3rem;
-      letter-spacing: 1.5rem;
-      margin-left: 1.5rem;
-      user-select: none;
-    }
-    #start, #perm {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0,0,0,0.8);
-      color: #0f0;
-      border: 3px solid #0f0;
-      padding: 20px 40px;
-      font-size: 1.8rem;
-      cursor: pointer;
-      pointer-events: all;
-      text-align: center;
-      border-radius: 12px;
-    }
-    #perm { display: none; }
-    .hidden { display: none; }
-  </style>
+<meta charset="UTF-8">
+<title>Pong – Tilt in Landscape</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    height:100vh;display:flex;align-items:center;justify-content:center;
+    background:#000;overflow:hidden;font-family:Arial,Helvetica,sans-serif;
+    touch-action:none;
+  }
+  canvas{background:#000;border:4px solid #0f0;max-width:100%;max-height:100%;}
+  #msg{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,.8);color:#0f0;padding:20px 40px;
+    border:3px solid #0f0;border-radius:12px;font-size:1.8rem;
+    text-align:center;pointer-events:all;cursor:pointer;
+  }
+  #score{
+    position:absolute;top:20px;width:100%;text-align:center;
+    color:#0f0;font-size:3rem;letter-spacing:1.5rem;margin-left:1.5rem;
+    user-select:none;
+  }
+</style>
 </head>
 <body>
 
-  <div id="ui">
-    <div id="score">0 0</div>
-  </div>
-  <canvas id="game"></canvas>
-  <button id="start">TILT TO START</button>
-  <button id="perm" class="hidden">ALLOW MOTION</button>
+<div id="score">0 0</div>
+<canvas id="c"></canvas>
+<div id="msg">TURN PHONE TO BEGIN</div>
 
-  <script>
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
-    const scoreDiv = document.getElementById('score');
-    const startBtn = document.getElementById('start');
-    const permBtn = document.getElementById('perm');
+<script>
+/* ---------- GLOBALS ---------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const msg   = document.getElementById('msg');
+const score = document.getElementById('score');
 
-    // Responsive canvas
-    function resize() {
-      const maxW = window.innerWidth * 0.95;
-      const maxH = window.innerHeight * 0.95;
-      const ratio = 4/3;
-      let w = maxW, h = maxW / ratio;
-      if (h > maxH) { h = maxH; w = maxH * ratio; }
-      canvas.width = w;
-      canvas.height = h;
-    }
-    window.addEventListener('resize', resize);
-    resize();
+const PADDLE_H = 100, PADDLE_W = 12, BALL = 12;
+let playerY, aiY, ballX, ballY, ballVX, ballVY;
+let pScore = 0, aiScore = 0;
+let running = false;
+let hasMotion = false;
+let tilt = 0;
 
-    // Game state
-    const paddleHeight = 100, paddleWidth = 12, ballSize = 12;
-    let playerY = canvas.height/2 - paddleHeight/2;  // Left (player)
-    let aiY = canvas.height/2 - paddleHeight/2;      // Right (AI)
-    let ballX = canvas.width/2, ballY = canvas.height/2;
-    let ballVX = 0, ballVY = 0;
-    let playerScore = 0, aiScore = 0;
-    let running = false;
-    let hasPermission = false;
+/* ---------- RESIZE & ORIENTATION ---------- */
+function resize() {
+  const maxW = innerWidth * .95, maxH = innerHeight * .95;
+  const ratio = 4/3;
+  let w = maxW, h = maxW / ratio;
+  if (h > maxH) { h = maxH; w = maxH * ratio; }
+  canvas.width = w; canvas.height = h;
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 200));
+resize();
 
-    // AI & Physics
-    const paddleSpeed = 6;
-    const ballSpeed = 5.5;
-    const maxBallSpeed = 11;
-    const aiReaction = 0.25; // 0 = perfect, 1 = slow
+/* ---------- ORIENTATION MESSAGE ---------- */
+function updateMessage() {
+  const landscape = innerWidth > innerHeight;
+  msg.textContent = landscape ? 'START' : 'TURN PHONE TO BEGIN';
+  msg.style.display = landscape ? 'block' : 'block';
+}
+updateMessage();
+addEventListener('resize', updateMessage);
+addEventListener('orientationchange', updateMessage);
 
-    // Gyro control
-    let tilt = 0;
-    function handleMotion(e) {
-      if (!e.accelerationIncludingGravity) return;
-      const x = e.accelerationIncludingGravity.x || 0;
-      tilt = x; // Positive = tilt right → paddle down
-    }
+/* ---------- MOTION PERMISSION ---------- */
+function requestMotion() {
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    DeviceMotionEvent.requestPermission()
+      .then(r => { if (r==='granted') initMotion(); })
+      .catch(()=>{ hasMotion=false; });
+  } else { initMotion(); }
+}
+function initMotion() {
+  hasMotion = true;
+  addEventListener('devicemotion', e=>{
+    if (!e.accelerationIncludingGravity) return;
+    tilt = e.accelerationIncludingGravity.x || 0;   // left/right tilt
+  });
+}
 
-    // Request permission (iOS 13+)
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-      permBtn.onclick = () => {
-        DeviceMotionEvent.requestPermission()
-          .then(state => {
-            if (state === 'granted') {
-              hasPermission = true;
-              permBtn.classList.add('hidden');
-              window.addEventListener('devicemotion', handleMotion);
-            }
-          })
-          .catch(console.error);
-      };
-    } else {
-      hasPermission = true;
-      window.addEventListener('devicemotion', handleMotion);
-    }
+/* ---------- START GAME ---------- */
+msg.onclick = () => {
+  if (innerWidth <= innerHeight) return;               // block start in portrait
+  if (!hasMotion) requestMotion();                     // ask iOS
+  msg.style.display = 'none';
+  resetBall();
+  playerY = canvas.height/2 - PADDLE_H/2;
+  aiY     = canvas.height/2 - PADDLE_H/2;
+  running = true;
+  requestAnimationFrame(loop);
+};
 
-    // Start game
-    startBtn.onclick = () => {
-      if (!hasPermission && typeof DeviceMotionEvent.requestPermission === 'function') {
-        permBtn.classList.remove('hidden');
-        return;
-      }
-      startBtn.classList.add('hidden');
-      resetBall();
-      running = true;
-      requestAnimationFrame(loop);
-    };
+/* ---------- BALL ---------- */
+function resetBall() {
+  ballX = canvas.width/2; ballY = canvas.height/2;
+  const ang = (Math.random()-0.5)*Math.PI/3;
+  const dir = Math.random()<0.5 ? -1 : 1;
+  const speed = 5.5;
+  ballVX = dir * speed * Math.cos(ang);
+  ballVY = speed * Math.sin(ang);
+}
 
-    function resetBall() {
-      ballX = canvas.width/2;
-      ballY = canvas.height/2;
-      const angle = (Math.random() - 0.5) * Math.PI / 3;
-      const dir = Math.random() < 0.5 ? -1 : 1;
-      ballVX = dir * ballSpeed * Math.cos(angle);
-      ballVY = ballSpeed * Math.sin(angle);
-    }
+/* ---------- UPDATE ---------- */
+function update() {
+  /* PLAYER – tilt */
+  if (hasMotion) {
+    const sens = 1.8;
+    const target = playerY + tilt*sens*20;
+    playerY += (target-playerY)*0.3;
+  }
+  playerY = Math.max(0, Math.min(canvas.height-PADDLE_H, playerY));
 
-    function update() {
-      // === PLAYER: TILT CONTROL ===
-      const sensitivity = 1.8;
-      const targetY = playerY + tilt * sensitivity * 20;
-      playerY += (targetY - playerY) * 0.3;
-      playerY = Math.max(0, Math.min(canvas.height - paddleHeight, playerY));
+  /* AI – simple tracking */
+  const ballCenter = ballY + BALL/2;
+  const target = ballCenter - PADDLE_H/2;
+  aiY += (target - aiY) * 0.25;
+  aiY = Math.max(0, Math.min(canvas.height-PADDLE_H, aiY));
 
-      // === AI: Track ball with delay ===
-      const ballCenter = ballY + ballSize/2;
-      const aiTarget = ballCenter - paddleHeight/2;
-      const diff = aiTarget - aiY;
-      aiY += diff * aiReaction;
-      aiY = Math.max(0, Math.min(canvas.height - paddleHeight, aiY));
+  /* BALL */
+  ballX += ballVX; ballY += ballVY;
 
-      // === BALL MOVEMENT ===
-      ballX += ballVX;
-      ballY += ballVY;
+  // wall bounce
+  if (ballY <= 0 || ballY >= canvas.height-BALL) ballVY *= -1;
 
-      // Wall bounce
-      if (ballY <= 0 || ballY >= canvas.height - ballSize) {
-        ballVY *= -1;
-        ballY = Math.max(0, Math.min(canvas.height - ballSize, ballY));
-      }
+  // player paddle
+  if (ballX-BALL < 30+PADDLE_W && ballVX<0 &&
+      ballY > playerY && ballY < playerY+PADDLE_H) {
+    ballX = 30+PADDLE_W;
+    const rel = (ballY-playerY)/PADDLE_H - 0.5;
+    ballVX = Math.abs(ballVX)*1.08;
+    ballVY = rel*9;
+    clampSpeed();
+  }
 
-      // === PLAYER PADDLE HIT (LEFT) ===
-      if (
-        ballX - ballSize < 30 + paddleWidth &&
-        ballY > playerY && ballY < playerY + paddleHeight &&
-        ballVX < 0
-      ) {
-        ballX = 30 + paddleWidth;
-        const rel = (ballY - playerY) / paddleHeight - 0.5;
-        ballVX = Math.abs(ballVX) * 1.08;
-        ballVY = rel * 9;
-        clampSpeed();
-      }
+  // AI paddle
+  if (ballX > canvas.width-30-PADDLE_W-BALL && ballVX>0 &&
+      ballY > aiY && ballY < aiY+PADDLE_H) {
+    ballX = canvas.width-30-PADDLE_W-BALL;
+    const rel = (ballY-aiY)/PADDLE_H - 0.5;
+    ballVX = -Math.abs(ballVX)*1.08;
+    ballVY = rel*9;
+    clampSpeed();
+  }
 
-      // === AI PADDLE HIT (RIGHT) ===
-      if (
-        ballX > canvas.width - 30 - paddleWidth - ballSize &&
-        ballY > aiY && ballY < aiY + paddleHeight &&
-        ballVX > 0
-      ) {
-        ballX = canvas.width - 30 - paddleWidth - ballSize;
-        const rel = (ballY - aiY) / paddleHeight - 0.5;
-        ballVX = -Math.abs(ballVX) * 1.08;
-        ballVY = rel * 9;
-        clampSpeed();
-      }
+  // scoring
+  if (ballX < -50) { aiScore++; resetBall(); }
+  if (ballX > canvas.width+50) { pScore++; resetBall(); }
+  score.textContent = pScore + ' ' + aiScore;
+}
+function clampSpeed() {
+  const s = Math.hypot(ballVX, ballVY);
+  if (s>11) { ballVX=ballVX/s*11; ballVY=ballVY/s*11; }
+}
 
-      // === SCORE ===
-      if (ballX < -50) { aiScore++; resetBall(); }
-      if (ballX > canvas.width + 50) { playerScore++; resetBall(); }
+/* ---------- DRAW ---------- */
+function draw() {
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
 
-      scoreDiv.textContent = playerScore + ' ' + aiScore;
-    }
+  // center line
+  ctx.strokeStyle='#222'; ctx.lineWidth=3;
+  ctx.setLineDash([10,10]);
+  ctx.beginPath(); ctx.moveTo(canvas.width/2,0);
+  ctx.lineTo(canvas.width/2,canvas.height); ctx.stroke();
+  ctx.setLineDash([]);
 
-    function clampSpeed() {
-      const speed = Math.hypot(ballVX, ballVY);
-      if (speed > maxBallSpeed) {
-        ballVX = ballVX / speed * maxBallSpeed;
-        ballVY = ballVY / speed * maxBallSpeed;
-      }
-    }
+  // paddles
+  ctx.fillStyle='#0f0'; ctx.fillRect(30, playerY, PADDLE_W, PADDLE_H);
+  ctx.fillStyle='#f44'; ctx.fillRect(canvas.width-30-PADDLE_W, aiY, PADDLE_W, PADDLE_H);
 
-    function draw() {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // ball
+  ctx.fillStyle='#fff'; ctx.fillRect(ballX, ballY, BALL, BALL);
+}
 
-      // Dashed center line
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([10, 10]);
-      ctx.beginPath();
-      ctx.moveTo(canvas.width/2, 0);
-      ctx.lineTo(canvas.width/2, canvas.height);
-      ctx.stroke();
-      ctx.setLineDash([]);
+/* ---------- LOOP ---------- */
+function loop() {
+  if (!running) return;
+  update(); draw();
+  requestAnimationFrame(loop);
+}
 
-      // Paddles
-      ctx.fillStyle = '#0f0'; // Player = green
-      ctx.fillRect(30, playerY, paddleWidth, paddleHeight);
-      ctx.fillStyle = '#f44'; // AI = red
-      ctx.fillRect(canvas.width - 30 - paddleWidth, aiY, paddleWidth, paddleHeight);
-
-      // Ball
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(ballX, ballY, ballSize, ballSize);
-
-      // Tilt indicator (optional debug)
-      // ctx.fillStyle = '#0f0';
-      // ctx.font = '12px monospace';
-      // ctx.fillText(`TILT: ${tilt.toFixed(2)}`, 10, canvas.height - 10);
-    }
-
-    function loop() {
-      if (!running) return;
-      update();
-      draw();
-      requestAnimationFrame(loop);
-    }
-
-    // Touch fallback (tap to nudge)
-    canvas.addEventListener('touchstart', e => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      const half = canvas.height / 2;
-      if (touch.clientY < half) playerY -= 30;
-      else playerY += 30;
-      playerY = Math.max(0, Math.min(canvas.height - paddleHeight, playerY));
-    });
-
-    // Auto-show permission on iOS
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-      startBtn.onclick = () => permBtn.classList.remove('hidden');
-    }
-  </script>
+/* ---------- TOUCH FALLBACK (tiny nudge) ---------- */
+canvas.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  const y = e.touches[0].clientY - canvas.getBoundingClientRect().top;
+  if (y < canvas.height/2) playerY -= 30;
+  else playerY += 30;
+  playerY = Math.max(0, Math.min(canvas.height-PADDLE_H, playerY));
+});
+</script>
 </body>
 </html>
