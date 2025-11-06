@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pong – One-File Game</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
+    canvas {
+      background: #000;
+      border: 4px solid #fff;
+      image-rendering: pixelated;
+    }
+    #score {
+      position: absolute;
+      top: 20px;
+      width: 100%;
+      text-align: center;
+      color: white;
+      font-size: 2rem;
+      letter-spacing: 2rem;
+      user-select: none;
+    }
+    #start {
+      position: absolute;
+      background: rgba(0,0,0,0.7);
+      color: #0f0;
+      font-size: 3rem;
+      padding: 20px 40px;
+      border: 3px solid #0f0;
+      cursor: pointer;
+      display: none;
+    }
+    #start.show { display: block; }
+  </style>
+</head>
+<body>
+
+  <div id="score">0 0</div>
+  <canvas id="game"></canvas>
+  <button id="start">CLICK TO START</button>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreDiv = document.getElementById('score');
+    const startBtn = document.getElementById('start');
+
+    // Responsive canvas
+    function resize() {
+      canvas.width = Math.min(window.innerWidth * 0.9, 800);
+      canvas.height = Math.min(window.innerHeight * 0.9, 600);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Game objects
+    const paddleHeight = 100, paddleWidth = 12, ballSize = 12;
+    let leftY = canvas.height/2 - paddleHeight/2;
+    let rightY = canvas.height/2 - paddleHeight/2;
+    let ballX = canvas.width/2, ballY = canvas.height/2;
+    let ballVX = 0, ballVY = 0;
+    let leftScore = 0, rightScore = 0;
+    let leftUp = false, leftDown = false;
+    let rightUp = false, rightDown = false;
+    let running = false;
+
+    // Speed settings
+    const paddleSpeed = 7;
+    const ballSpeed = 6;
+    const maxBallSpeed = 12;
+
+    // Input
+    window.addEventListener('keydown', e => {
+      if (e.key === 'w') leftUp = true;
+      if (e.key === 's') leftDown = true;
+      if (e.key === 'ArrowUp') rightUp = true;
+      if (e.key === 'ArrowDown') rightDown = true;
+    });
+    window.addEventListener('keyup', e => {
+      if (e.key === 'w') leftUp = false;
+      if (e.key === 's') leftDown = false;
+      if (e.key === 'ArrowUp') rightUp = false;
+      if (e.key === 'ArrowDown') rightDown = false;
+    });
+
+    // Touch for mobile
+    canvas.addEventListener('touchstart', e => {
+      const touch = e.touches[0];
+      const half = canvas.width / 2;
+      if (touch.clientX < half) {
+        if (touch.clientY < canvas.height/2) leftUp = true;
+        else leftDown = true;
+      } else {
+        if (touch.clientY < canvas.height/2) rightUp = true;
+        else rightDown = true;
+      }
+    });
+    canvas.addEventListener('touchend', () => {
+      leftUp = leftDown = rightUp = rightDown = false;
+    });
+
+    // Start / Restart
+    startBtn.onclick = () => {
+      startBtn.classList.remove('show');
+      resetBall();
+      running = true;
+      requestAnimationFrame(loop);
+    };
+    startBtn.classList.add('show');
+
+    function resetBall() {
+      ballX = canvas.width/2;
+      ballY = canvas.height/2;
+      const angle = Math.random() * Math.PI/2 - Math.PI/4; // -45° to +45°
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      ballVX = dir * ballSpeed * Math.cos(angle);
+      ballVY = ballSpeed * Math.sin(angle);
+    }
+
+    function update() {
+      // Paddles
+      if (leftUp) leftY = Math.max(0, leftY - paddleSpeed);
+      if (leftDown) leftY = Math.min(canvas.height - paddleHeight, leftY + paddleSpeed);
+      if (rightUp) rightY = Math.max(0, rightY - paddleSpeed);
+      if (rightDown) rightY = Math.min(canvas.height - paddleHeight, rightY + paddleSpeed);
+
+      // Ball
+      ballX += ballVX;
+      ballY += ballVY;
+
+      // Wall bounce
+      if (ballY < 0 || ballY > canvas.height - ballSize) {
+        ballVY *= -1;
+      }
+
+      // Paddle hit
+      if (
+        ballX < 30 + paddleWidth && 
+        ballY > leftY && ballY < leftY + paddleHeight &&
+        ballX > 30
+      ) {
+        ballX = 30 + paddleWidth;
+        const rel = (ballY - leftY) / paddleHeight - 0.5;
+        ballVX = Math.abs(ballVX) * 1.05;
+        ballVY = rel * 8;
+        clampSpeed();
+      }
+      if (
+        ballX > canvas.width - 30 - paddleWidth - ballSize && 
+        ballY > rightY && ballY < rightY + paddleHeight &&
+        ballX < canvas.width - 30 - paddleWidth
+      ) {
+        ballX = canvas.width - 30 - paddleWidth - ballSize;
+        const rel = (ballY - rightY) / paddleHeight - 0.5;
+        ballVX = -Math.abs(ballVX) * 1.05;
+        ballVY = rel * 8;
+        clampSpeed();
+      }
+
+      // Score
+      if (ballX < -50) { rightScore++; resetBall(); }
+      if (ballX > canvas.width + 50) { leftScore++; resetBall(); }
+      scoreDiv.textContent = leftScore + ' ' + rightScore;
+    }
+
+    function clampSpeed() {
+      const speed = Math.sqrt(ballVX*ballVX + ballVY*ballVY);
+      if (speed > maxBallSpeed) {
+        ballVX = ballVX / speed * maxBallSpeed;
+        ballVY = ballVY / speed * maxBallSpeed;
+      }
+    }
+
+    function draw() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Center line
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 15]);
+      ctx.beginPath();
+      ctx.moveTo(canvas.width/2, 0);
+      ctx.lineTo(canvas.width/2, canvas.height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Paddles
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(30, leftY, paddleWidth, paddleHeight);
+      ctx.fillRect(canvas.width - 30 - paddleWidth, rightY, paddleWidth, paddleHeight);
+
+      // Ball
+      ctx.fillRect(ballX, ballY, ballSize, ballSize);
+    }
+
+    function loop() {
+      if (!running) return;
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // Click canvas to start on desktop too
+    canvas.onclick = () => { if (!running) startBtn.onclick(); };
+  </script>
+</body>
+</html>
