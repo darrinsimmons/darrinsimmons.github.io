@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pong – Tilt to 10</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    height:100vh;display:flex;align-items:center;justify-content:center;
+    background:#000;overflow;overflow:hidden;font-family:Arial,Helvetica,sans-serif;
+    touch-action:none;
+  }
+  canvas{background:#000;border:4px solid #0f0;max-width:100%;max-height:100%;image-rendering:pixelated;}
+  #ui{
+    position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;
+    color:#0f0;text-align:center;padding-top:20px;
+  }
+  #score{font-size:3rem;letter-spacing:1.5rem;margin-left:1.5rem;user-select:none;}
+  #msg{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,.85);color:#0f0;padding:20px 40px;
+    border:3px solid #0f0;border-radius:12px;font-size:1.8rem;
+    text-align:center;pointer-events:all;cursor:pointer;
+  }
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div id="score">0 0</div>
+</div>
+<canvas id="c"></canvas>
+<div id="startMsg" class="msg">TURN PHONE TO BEGIN</div>
+<div id="endMsg" class="msg hidden"></div>
+
+<script>
+/* ---------- GLOBALS ---------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const startMsg = document.getElementById('startMsg');
+const endMsg = document.getElementById('endMsg');
+
+const PADDLE_H = 100, PADDLE_W = 12, BALL = 12;
+let playerY, aiY, ballX, ballY, ballVX, ballVY;
+let pScore = 0, aiScore = 0;
+let running = false, gameOver = false;
+let hasMotion = false;
+let tiltX = 0, tiltY = 0; // we'll use X (left/right) in landscape
+
+const WIN_SCORE = 10;
+
+/* ---------- RESIZE & ORIENTATION ---------- */
+function resize() {
+  const maxW = innerWidth * .95, maxH = innerHeight * .95;
+  const ratio = 4/3;
+  let w = maxW, h = maxW / ratio;
+  if (h > maxH) { h = maxH; w = maxH * ratio; }
+  canvas.width = w; canvas.height = h;
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 200));
+resize();
+
+/* ---------- ORIENTATION MESSAGE ---------- */
+function updateStartMessage() {
+  const isLandscape = innerWidth > innerHeight;
+  startMsg.textContent = isLandscape ? 'START' : 'TURN PHONE TO BEGIN';
+  // Only show start message if game hasn't started yet
+  if (!running && !gameOver) {
+    startMsg.classList.remove('hidden');
+  }
+}
+updateStartMessage();
+addEventListener('resize', updateStartMessage);
+addEventListener('orientationchange', updateStartMessage);
+
+/* ---------- MOTION SETUP ---------- */
+function requestMotion() {
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    DeviceMotionEvent.requestPermission()
+      .then(r => { if (r==='granted') initMotion(); })
+      .catch(()=>{ hasMotion=false; });
+  } else { initMotion(); }
+}
+function initMotion() {
+  hasMotion = true;
+  addEventListener('devicemotion', e => {
+    if (!e.accelerationIncludingGravity) return;
+    // In landscape: X = left/right tilt (like steering wheel)
+    tiltX = e.accelerationIncludingGravity.x || 0;
+    tiltY = e.accelerationIncludingGravity.y || 0;
+  });
+}
+
+/* ---------- START GAME ---------- */
+startMsg.onclick = () => {
+  if (innerWidth <= innerHeight) return; // block in portrait
+  if (!hasMotion) requestMotion();
+  startMsg.classList.add('hidden');
+  resetGame();
+  running = true;
+  gameOver = false;
+  requestAnimationFrame(loop);
+};
+
+/* ---------- PLAY AGAIN ---------- */
+function showPlayAgain(winner) {
+  gameOver = true;
+  running = false;
+  endMsg.textContent = winner + ' WINS!\nPLAY AGAIN';
+  endMsg.classList.remove('hidden');
+}
+endMsg.onclick = () => {
+  endMsg.classList.add('hidden');
+  resetGame();
+  running = true;
+  requestAnimationFrame(loop);
+};
+
+/* ---------- RESET ---------- */
+function resetGame() {
+  pScore = 0; aiScore = 0;
+  scoreEl.textContent = '0 0';
+  playerY = canvas.height/2 - PADDLE_H/2;
+  aiY = canvas.height/2 - PADDLE_H/2;
+  resetBall();
+}
+function resetBall() {
+  ballX = canvas.width/2; ballY = canvas.height/2;
+  const ang = (Math.random()-0.5)*Math.PI/3;
+  const dir = Math.random()<0.5 ? -1 : 1;
+  const speed = 5.5;
+  ballVX = dir * speed * Math.cos(ang);
+  ballVY = speed * Math.sin(ang);
+}
+
+/* ---------- UPDATE ---------- */
+function update() {
+  /* PLAYER – steering wheel tilt (X axis in landscape) */
+  if (hasMotion) {
+    const sens = 2.2;
+    const target = playerY + tiltX * sens * 18;
+    playerY += (target - playerY) * 0.35;
+  }
+  playerY = Math.max(0, Math.min(canvas.height - PADDLE_H, playerY));
+
+  /* AI – track ball */
+  const ballCenter = ballY + BALL/2;
+  const target = ballCenter - PADDLE_H/2;
+  aiY += (target - aiY) * 0.28;
+  aiY = Math.max(0, Math.min(canvas.height - PADDLE_H, aiY));
+
+  /* BALL */
+  ballX += ballVX; ballY += ballVY;
+
+  // wall bounce
+  if (ballY <= 0 || ballY >= canvas.height - BALL) ballVY *= -1;
+
+  // player hit
+  if (ballX - BALL < 30 + PADDLE_W && ballVX < 0 &&
+      ballY > playerY && ballY < playerY + PADDLE_H) {
+    ballX = 30 + PADDLE_W;
+    const rel = (ballY - playerY)/PADDLE_H - 0.5;
+    ballVX = Math.abs(ballVX) * 1.08;
+    ballVY = rel * 9;
+    clampSpeed();
+  }
+
+  // AI hit
+  if (ballX > canvas.width - 30 - PADDLE_W - BALL && ballVX > 0 &&
+      ballY > aiY && ballY < aiY + PADDLE_H) {
+    ballX = canvas.width - 30 - PADDLE_W - BALL;
+    const rel = (ballY - aiY)/PADDLE_H - 0.5;
+    ballVX = -Math.abs(ballVX) * 1.08;
+    ballVY = rel * 9;
+    clampSpeed();
+  }
+
+  // scoring
+  if (ballX < -50) {
+    aiScore++;
+    if (aiScore >= WIN_SCORE) { showPlayAgain('AI'); return; }
+    resetBall();
+  }
+  if (ballX > canvas.width + 50) {
+    pScore++;
+    if (pScore >= WIN_SCORE) { showPlayAgain('PLAYER'); return; }
+    resetBall();
+  }
+  scoreEl.textContent = pScore + ' ' + aiScore;
+}
+function clampSpeed() {
+  const s = Math.hypot(ballVX, ballVY);
+  if (s > 11) { ballVX = ballVX/s*11; ballVY = ballVY/s*11; }
+}
+
+/* ---------- DRAW ---------- */
+function draw() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // center line
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 3;
+  ctx.setLineDash([10,10]);
+  ctx.beginPath(); ctx.moveTo(canvas.width/2,0);
+  ctx.lineTo(canvas.width/2,canvas.height); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // paddles
+  ctx.fillStyle = '#0f0'; ctx.fillRect(30, playerY, PADDLE_W, PADDLE_H);
+  ctx.fillStyle = '#f44'; ctx.fillRect(canvas.width-30-PADDLE_W, aiY, PADDLE_W, PADDLE_H);
+
+  // ball
+  ctx.fillStyle = '#fff'; ctx.fillRect(ballX, ballY, BALL, BALL);
+}
+
+/* ---------- LOOP ---------- */
+function loop() {
+  if (!running) return;
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- TOUCH FALLBACK ---------- */
+canvas.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const y = e.touches[0].clientY - rect.top;
+  if (y < canvas.height/2) playerY -= 35;
+  else playerY += 35;
+  playerY = Math.max(0, Math.min(canvas.height-PADDLE_H, playerY));
+});
+</script>
+</body>
+</html>
